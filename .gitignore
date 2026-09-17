@@ -1,0 +1,14 @@
+# Node
+node_modules/
+dist/
+coverage/
+*.log
+
+# 환경변수
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
