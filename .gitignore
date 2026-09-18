@@ -4,6 +4,10 @@ dist/
 coverage/
 *.log
 
+# React Router
+/.react-router/
+/build/
+
 # 환경변수
 .env
 .env.*
@@ -12,3 +16,4 @@ coverage/
 # IDE
 .idea/
 .vscode/
+.DS_Store
