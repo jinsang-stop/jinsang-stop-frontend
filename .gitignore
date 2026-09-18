@@ -1,7 +1,19 @@
-.DS_Store
-.env
-/node_modules/
+# Node
+node_modules/
+dist/
+coverage/
+*.log
 
 # React Router
 /.react-router/
 /build/
+
+# 환경변수
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
