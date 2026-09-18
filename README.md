@@ -26,7 +26,9 @@ cp .env.example .env
 | 변수 | 뜻 |
 |---|---|
 | `VITE_API_BASE_URL` | Spring 백엔드 주소. 기본 `http://localhost:8080` |
-| `VITE_USE_MOCK_API` | `true`면 백엔드 대신 임시 카드 응답을 쓴다. 백엔드가 뜨면 끈다 |
+| `VITE_USE_MOCK_API` | `true`면 백엔드 대신 임시 응답(공식 카드·로그인)을 쓴다. 백엔드가 뜨면 끈다 |
+
+목업 모드에서는 아이디·비밀번호를 비우지 않으면 아무 값으로나 로그인되고, 입력한 아이디가 계정 이름으로 표시된다.
 
 개발 서버 (HMR) 실행 — `http://localhost:5173`:
 
