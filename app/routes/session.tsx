@@ -8,11 +8,15 @@ import { fetchOfficialCard } from "~/officialCard/api";
 import { INTENSITIES } from "~/officialCard/types";
 import type { Intensity, OfficialCard } from "~/officialCard/types";
 import { AttitudeScorePanel } from "~/trainingSession/AttitudeScorePanel";
-import type { ScoreStatus } from "~/trainingSession/AttitudeScorePanel";
+import type { ScorePanelStatus } from "~/trainingSession/AttitudeScorePanel";
 import { SpeakControl } from "~/trainingSession/SpeakControl";
 import { TurnLog } from "~/trainingSession/TurnLog";
 import { TrainingSessionErrorCode, isUnscored } from "~/trainingSession/types";
-import type { TurnScore } from "~/trainingSession/types";
+import type {
+  TrainingSession,
+  TrainingSessionStatus,
+  TurnScore,
+} from "~/trainingSession/types";
 import { useRecorder } from "~/trainingSession/useRecorder";
 import { useTrainingSession } from "~/trainingSession/useTrainingSession";
 import type {
@@ -72,6 +76,20 @@ export default function Session({ loaderData }: Route.ComponentProps) {
     );
   }
 
+  if (phase.kind === "ownSessionInProgress") {
+    return (
+      <SessionFrame card={card} intensity={intensity}>
+        <OwnSessionInProgress
+          current={phase.session}
+          card={card}
+          intensity={intensity}
+          onResume={() => session.resume(phase.session)}
+          onAbortAndRestart={() => session.abortAndRestart(phase.session)}
+        />
+      </SessionFrame>
+    );
+  }
+
   if (phase.kind === "aborted") {
     return (
       <SessionFrame card={card} intensity={intensity}>
@@ -80,7 +98,20 @@ export default function Session({ loaderData }: Route.ComponentProps) {
     );
   }
 
-  const { turns, scores, activity } = session;
+  if (phase.kind === "ended") {
+    return (
+      <SessionFrame card={card} intensity={intensity}>
+        <Ended
+          status={phase.status}
+          turnsToCalm={phase.turnsToCalm}
+          card={card}
+          intensity={intensity}
+        />
+      </SessionFrame>
+    );
+  }
+
+  const { turns, scores, activity, turnCount } = session;
   const scoreView = toScoreView(turns, scores);
 
   async function startSpeaking() {
@@ -99,12 +130,19 @@ export default function Session({ loaderData }: Route.ComponentProps) {
     <SessionFrame
       card={card}
       intensity={intensity}
-      turnCount={turns.length}
+      turnCount={turnCount}
+      hardTurnLimit={phase.session.hardTurnLimit}
     >
       <AttitudeScorePanel {...scoreView} />
 
       <div className="mt-4 flex flex-col rounded-xl border border-gray-200 dark:border-gray-800">
         <div className="max-h-[55vh] min-h-56 overflow-y-auto">
+          {turns.length === 0 && turnCount > 0 && (
+            <p className="border-b border-gray-200 px-4 py-2 text-xs text-gray-500 dark:border-gray-800">
+              이어 하는 훈련입니다. 앞선 {turnCount}턴의 대화는 이 화면에 다시
+              나오지 않습니다.
+            </p>
+          )}
           <TurnLog
             entries={turns.map((turn) => ({
               ...turn,
@@ -112,13 +150,18 @@ export default function Session({ loaderData }: Route.ComponentProps) {
                 scores[turn.turnNumber] !== undefined &&
                 isUnscored(scores[turn.turnNumber]),
             }))}
-            complainantDisplayRole={card.complainantRoleName}
+            complainantRoleName={phase.session.complainantRoleName}
             submitting={activity === "submitting"}
             speakingTurnNumber={session.speakingTurnNumber}
           />
         </div>
         <div className="space-y-3 border-t border-gray-200 p-4 dark:border-gray-800">
-          {session.notice && <TurnNotice notice={session.notice} />}
+          {session.notice && (
+            <TurnNotice
+              notice={session.notice}
+              onResend={session.resendUnsentTurn}
+            />
+          )}
           <SpeakControl
             recorderStatus={recorder.status}
             recorderError={recorder.error}
@@ -130,7 +173,7 @@ export default function Session({ loaderData }: Route.ComponentProps) {
                   ? "complainantSpeech"
                   : null
             }
-            complainantDisplayRole={card.complainantRoleName}
+            complainantRoleName={phase.session.complainantRoleName}
             onStart={startSpeaking}
             onStop={stopSpeaking}
           />
@@ -145,12 +188,14 @@ function SessionFrame({
   card,
   intensity,
   turnCount,
+  hardTurnLimit,
   children,
 }: {
   card: OfficialCard;
   intensity: Intensity;
-  /** 지금까지 닫힌 `발화 턴` 수. 세션이 진행 중일 때만 보여준다. */
+  /** 지금까지 확정된 `발화 턴` 수. 세션이 진행 중일 때만 보여준다. */
   turnCount?: number;
+  hardTurnLimit?: number;
   children: React.ReactNode;
 }) {
   return (
@@ -175,7 +220,7 @@ function SessionFrame({
             <span className="font-semibold text-gray-900 dark:text-gray-50">
               {turnCount}
             </span>{" "}
-            / {card.hardTurnLimit}턴
+            / {hardTurnLimit ?? card.hardTurnLimit}턴
           </p>
         )}
       </header>
@@ -193,14 +238,13 @@ function StartFailed({
   cardId: number;
   onRetry: () => void;
 }) {
-  const inProgress =
-    error instanceof ApiError &&
-    error.code === TrainingSessionErrorCode.sessionInProgress;
+  const busy =
+    error instanceof ApiError && error.code === TrainingSessionErrorCode.busy;
   const notReady =
     error instanceof ApiError &&
     error.code === TrainingSessionErrorCode.environmentNotReady;
 
-  if (!inProgress && !notReady) {
+  if (!busy && !notReady) {
     return (
       <div className="space-y-4">
         <ErrorNotice error={error} onRetry={onRetry} />
@@ -212,7 +256,7 @@ function StartFailed({
   return (
     <div className="rounded-xl border border-gray-200 p-6 dark:border-gray-800">
       <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">
-        {inProgress
+        {busy
           ? "지금은 훈련을 시작할 수 없습니다"
           : "훈련 환경이 준비되지 않았습니다"}
       </h2>
@@ -220,7 +264,7 @@ function StartFailed({
         {toUserMessage(error)}
       </p>
       <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-        {inProgress
+        {busy
           ? "한 번에 한 사람만 훈련할 수 있습니다. 화면이 멈춘 것이 아니니 잠시 뒤 다시 시도해 주세요."
           : "음성·대화 환경이 켜지면 바로 시작할 수 있습니다."}
       </p>
@@ -233,6 +277,65 @@ function StartFailed({
           다시 시도
         </button>
         <BackToCard cardId={cardId} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 진행 중인 세션이 내 것이다(새로고침했거나 다른 탭에서 시작). 같은 카드·강도면
+ * 그대로 이어 하고, 다르면 그 세션 화면으로 가거나 중단하고 새로 시작한다.
+ */
+function OwnSessionInProgress({
+  current,
+  card,
+  intensity,
+  onResume,
+  onAbortAndRestart,
+}: {
+  current: TrainingSession;
+  card: OfficialCard;
+  intensity: Intensity;
+  onResume: () => void;
+  onAbortAndRestart: () => void;
+}) {
+  const sameSetting =
+    current.cardId === card.cardId && current.intensity === intensity;
+  const primaryClassName =
+    "rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300";
+
+  return (
+    <div className="rounded-xl border border-gray-200 p-6 dark:border-gray-800">
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">
+        진행 중인 내 훈련이 있습니다
+      </h2>
+      <p className="mt-2 text-gray-700 dark:text-gray-300">
+        {sameSetting
+          ? `이 카드로 ${current.turnCount}턴까지 진행한 훈련입니다.`
+          : `다른 설정(강도 ${current.intensity}단계)으로 ${current.turnCount}턴까지 진행한 훈련입니다.`}{" "}
+        이어 하거나, 중단하고 지금 고른 설정으로 새로 시작할 수 있습니다.
+      </p>
+      <div className="mt-5 flex flex-wrap items-center gap-4">
+        {sameSetting ? (
+          <button type="button" onClick={onResume} className={primaryClassName}>
+            이어 하기
+          </button>
+        ) : (
+          // 그 세션의 카드·강도 화면으로 가면 다시 이 안내를 거쳐 이어 하게 된다.
+          <a
+            href={`/cards/${current.cardId}/session?intensity=${current.intensity}`}
+            className={primaryClassName}
+          >
+            그 훈련 이어 하기
+          </a>
+        )}
+        <button
+          type="button"
+          onClick={onAbortAndRestart}
+          className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+        >
+          중단하고 새로 시작
+        </button>
       </div>
     </div>
   );
@@ -262,21 +365,55 @@ function Aborted({
         사용자의 응대 때문이 아닙니다. 이 세션은 성장 기록에 들어가지 않습니다.
       </p>
       <div className="mt-5 flex flex-wrap items-center gap-4">
-        {/* 같은 주소로 다시 들어가면 새 세션이 시작된다. */}
-        <a
-          href={`/cards/${card.cardId}/session?intensity=${intensity}`}
-          className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300"
-        >
-          같은 설정으로 다시 시작
-        </a>
+        <RestartLink card={card} intensity={intensity} />
         <BackToCard cardId={card.cardId} />
       </div>
     </div>
   );
 }
 
-function TurnNotice({ notice }: { notice: SessionNotice }) {
-  if (notice.kind === "emptyTranscript") {
+/** 진정 종료 · 턴 상한 도달. 리포트로 이어지는 종료 화면은 #6에서 채운다. */
+function Ended({
+  status,
+  turnsToCalm,
+  card,
+  intensity,
+}: {
+  status: TrainingSessionStatus;
+  turnsToCalm: number | null;
+  card: OfficialCard;
+  intensity: Intensity;
+}) {
+  const calmed = status === "CALMED";
+  return (
+    <div
+      role="status"
+      className="rounded-xl border border-gray-200 p-6 dark:border-gray-800"
+    >
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">
+        {calmed ? "진정 종료" : "진정시키지 못한 채 종료"}
+      </h2>
+      <p className="mt-2 text-gray-700 dark:text-gray-300">
+        {calmed
+          ? `${card.complainantRoleName}이(가) 진정했습니다. 소요 턴 수 ${turnsToCalm ?? "-"}턴.`
+          : `최대 ${card.hardTurnLimit}턴에 닿아 훈련이 끝났습니다.`}
+      </p>
+      <div className="mt-5 flex flex-wrap items-center gap-4">
+        <RestartLink card={card} intensity={intensity} />
+        <BackToCard cardId={card.cardId} />
+      </div>
+    </div>
+  );
+}
+
+function TurnNotice({
+  notice,
+  onResend,
+}: {
+  notice: SessionNotice;
+  onResend: () => void;
+}) {
+  if (notice.kind === "speakAgain") {
     return (
       <p
         role="status"
@@ -289,10 +426,50 @@ function TurnNotice({ notice }: { notice: SessionNotice }) {
       </p>
     );
   }
+  if (notice.kind === "environmentNotReady") {
+    return (
+      <div
+        role="status"
+        className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100"
+      >
+        <p>
+          {toUserMessage(notice.error)}{" "}
+          <span className="text-amber-700 dark:text-amber-300">
+            (턴 수는 늘지 않았습니다)
+          </span>
+        </p>
+        <button
+          type="button"
+          onClick={onResend}
+          className="rounded-md border border-amber-400 px-3 py-1.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900"
+        >
+          같은 녹음 다시 보내기
+        </button>
+      </div>
+    );
+  }
   return <ErrorNotice error={notice.error} />;
 }
 
-function BackToCard({ cardId }: { cardId: string }) {
+function RestartLink({
+  card,
+  intensity,
+}: {
+  card: OfficialCard;
+  intensity: Intensity;
+}) {
+  return (
+    // 같은 주소로 다시 들어가면 새 세션이 시작된다.
+    <a
+      href={`/cards/${card.cardId}/session?intensity=${intensity}`}
+      className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300"
+    >
+      같은 설정으로 다시 시작
+    </a>
+  );
+}
+
+function BackToCard({ cardId }: { cardId: number }) {
   return (
     <Link to={`/cards/${cardId}`} className="text-sm underline">
       카드로 돌아가기
@@ -304,13 +481,17 @@ function BackToCard({ cardId }: { cardId: string }) {
 function toScoreView(
   turns: CompletedTurn[],
   scores: Record<number, TurnScore>,
-): { status: ScoreStatus; latest: TurnScore | null; previous: TurnScore | null } {
+): {
+  status: ScorePanelStatus;
+  latest: TurnScore | null;
+  previous: TurnScore | null;
+} {
   const lastTurn = turns.at(-1);
   const successes = turns
     .map((turn) => scores[turn.turnNumber])
-    .filter((score): score is TurnScore => !!score && !isUnscored(score));
+    .filter((score): score is TurnScore => score?.status === "SCORED");
 
-  let status: ScoreStatus;
+  let status: ScorePanelStatus;
   if (!lastTurn) {
     status = { kind: "waiting" };
   } else {
