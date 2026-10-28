@@ -16,7 +16,7 @@ export async function clientLoader({ request }: Route.ClientLoaderArgs) {
     return { user: await fetchCurrentUser() };
   } catch (error) {
     // 실제 호출의 401은 apiFetch가 이미 redirect로 바꾼다. 여기 남은 것은
-    // 백엔드 없이 도는 목업 경로다 — 백엔드가 열리면 이 분기도 함께 지운다.
+    // 백엔드 없이 도는 목업 경로다.
     if (error instanceof ApiError && error.status === 401) {
       const { pathname, search } = new URL(request.url);
       throw redirect(
@@ -52,7 +52,7 @@ export default function Protected({ loaderData }: Route.ComponentProps) {
           </Link>
           <div className="flex items-center gap-3 text-sm">
             <span className="text-gray-700 dark:text-gray-300">
-              {user.name}
+              {user.displayName}
             </span>
             <button
               type="button"

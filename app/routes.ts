@@ -7,6 +7,7 @@ import {
 
 export default [
   route("login", "routes/login.tsx"),
+  route("signup", "routes/signup.tsx"),
   // 아래 화면들은 로그인해야 볼 수 있다.
   layout("routes/protected.tsx", [
     index("routes/cards.tsx"),
