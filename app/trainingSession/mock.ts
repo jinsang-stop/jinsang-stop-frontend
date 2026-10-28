@@ -56,13 +56,78 @@ type MockSession = {
   /** 한 번만 보여 줄 실패를 이미 보여 줬는가. */
   failureShown: boolean;
   /** 턴 번호 → 점수가 "도착"하는 시각. 점수가 턴 응답보다 늦게 오는 것을 흉내 낸다. */
-  scoreReadyAt: Map<number, number>;
+  scoreReadyAt: Record<number, number>;
+  /** 확정된 턴 — 리포트·성장 기록 목업이 읽는다. */
+  turns: MockTurn[];
+};
+
+type MockTurn = Pick<
+  UtteranceTurnResult,
+  "turnNumber" | "userTranscript" | "complainantLine" | "calmed"
+>;
+
+/**
+ * 목업 세션 저장소. "같은 설정으로 다시 시작"은 문서를 새로 불러오므로
+ * 리포트·성장 기록을 이어 보려면 `sessionStorage`에 남겨 둬야 한다.
+ */
+const STORAGE_KEY = "jinsang-stop:mock-training-sessions";
+type MockStore = {
+  sessions: MockSession[];
+  nextSessionId: number;
+  mineSessionId: number | null;
+  mineCreated: boolean;
 };
 
 const sessions = new Map<number, MockSession>();
 let nextSessionId = 1;
 /** `mine` 시나리오에서 이미 진행 중인 내 세션. 중단하면 사라진다. */
 let mineSessionId: number | null = null;
+let mineCreated = false;
+loadStore();
+
+function loadStore() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+    const store = JSON.parse(raw) as MockStore;
+    store.sessions.forEach((it) => sessions.set(it.session.sessionId, it));
+    nextSessionId = store.nextSessionId;
+    mineSessionId = store.mineSessionId;
+    mineCreated = store.mineCreated;
+  } catch {
+    // 서버 렌더링이나 저장소가 막힌 환경 — 빈 저장소로 시작한다.
+  }
+}
+
+function saveStore() {
+  const store: MockStore = {
+    sessions: [...sessions.values()],
+    nextSessionId,
+    mineSessionId,
+    mineCreated,
+  };
+  try {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+  } catch {
+    // 저장하지 못해도 이번 화면에서는 그대로 동작한다.
+  }
+}
+
+/** 리포트·성장 기록 목업용 — 세션과 턴별 최종 점수. */
+export function mockSessionRecords(): {
+  session: TrainingSession;
+  turns: (MockTurn & { score: TurnScore })[];
+}[] {
+  return [...sessions.values()].map((mock) => ({
+    session: { ...mock.session },
+    turns: mock.turns.map((turn) => ({
+      ...turn,
+      score: scoreOf(mock, turn.turnNumber),
+    })),
+  }));
+}
 
 const SUBMIT_DELAY_MS = 1500;
 const SCORE_DELAY_MS = 1800;
@@ -120,6 +185,7 @@ export async function mockAbortTrainingSession(
   if (mineSessionId === sessionId) {
     mineSessionId = null;
   }
+  saveStore();
   return { ...mock.session };
 }
 
@@ -154,7 +220,12 @@ export async function mockSubmitUtteranceTurn(
     }
   }
   if (scenario === "abort" && turnNumber === 2) {
-    mock.session = { ...session, status: "SYSTEM_ERROR" };
+    mock.session = {
+      ...session,
+      status: "SYSTEM_ERROR",
+      endedAt: new Date().toISOString(),
+    };
+    saveStore();
     throw new ApiError(
       500,
       TrainingSessionErrorCode.endedBySystemError,
@@ -173,6 +244,7 @@ export async function mockSubmitUtteranceTurn(
     turnCount: turnNumber,
     status: sessionStatus,
     turnsToCalm: calmed ? turnNumber : null,
+    endedAt: sessionStatus === "IN_PROGRESS" ? null : new Date().toISOString(),
   };
 
   const lines = calmed ? MOCK_CALMED_LINES : MOCK_COMPLAINANT_LINES;
@@ -181,15 +253,20 @@ export async function mockSubmitUtteranceTurn(
   if (turnNumber === 1) {
     score = scoreOf(mock, turnNumber);
   } else {
-    mock.scoreReadyAt.set(turnNumber, Date.now() + SCORE_DELAY_MS);
+    mock.scoreReadyAt[turnNumber] = Date.now() + SCORE_DELAY_MS;
     score = pending(turnNumber);
   }
-  return {
-    sessionId,
+  const turn: MockTurn = {
     turnNumber,
     userTranscript: MOCK_TRANSCRIPTS[(turnNumber - 1) % MOCK_TRANSCRIPTS.length],
     complainantLine: line,
     calmed,
+  };
+  mock.turns.push(turn);
+  saveStore();
+  return {
+    sessionId,
+    ...turn,
     complainantAudio: silentWavBase64(Math.min(1500 + line.length * 80, 6000)),
     complainantAudioContentType: "audio/wav",
     score,
@@ -207,7 +284,7 @@ export async function mockFetchTurnScore(
   if (turnNumber < 1 || turnNumber > mock.session.turnCount) {
     throw new ApiError(404, "TURN_NOT_FOUND", "발화 턴을 찾을 수 없습니다.");
   }
-  const readyAt = mock.scoreReadyAt.get(turnNumber) ?? 0;
+  const readyAt = mock.scoreReadyAt[turnNumber] ?? 0;
   if (Date.now() < readyAt) {
     return pending(turnNumber);
   }
@@ -239,15 +316,18 @@ function createSession(
     },
     scenario,
     failureShown: false,
-    scoreReadyAt: new Map(),
+    scoreReadyAt: {},
+    turns: [],
   };
   sessions.set(mock.session.sessionId, mock);
+  saveStore();
   return mock;
 }
 
 /** `mine` 시나리오의 내 세션을 한 번 만들어 둔다. 중단했으면 더 만들지 않는다. */
 function ensureMineSession(): boolean {
-  if (mineSessionId === null && !sessions.size) {
+  if (!mineCreated) {
+    mineCreated = true;
     mineSessionId = createSession(1, 1, null, 2).session.sessionId;
   }
   return mineSessionId !== null;

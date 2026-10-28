@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate, useRevalidator } from "react-router";
+import { Link, useNavigate, useRevalidator, useSearchParams } from "react-router";
 
 import type { Route } from "./+types/cardDetail";
 import { ErrorNotice } from "~/components/ErrorNotice";
@@ -7,7 +7,7 @@ import { Page } from "~/components/Page";
 import { fetchIntensityGuide, fetchOfficialCard } from "~/officialCard/api";
 import { IntensityNoticeDialog } from "~/officialCard/IntensityNoticeDialog";
 import { IntensityPicker } from "~/officialCard/IntensityPicker";
-import { findLevel } from "~/officialCard/types";
+import { INTENSITIES, findLevel } from "~/officialCard/types";
 import type { Intensity } from "~/officialCard/types";
 
 export function meta(_: Route.MetaArgs) {
@@ -30,8 +30,11 @@ export default function CardDetail({ loaderData }: Route.ComponentProps) {
   const { card, intensityGuide } = loaderData;
   const navigate = useNavigate();
 
+  const [searchParams] = useSearchParams();
+  // 재도전으로 들어오면 그때의 강도를 골라 둔다. 고지 확인은 다시 받는다.
   const [intensity, setIntensity] = useState<Intensity>(
-    intensityGuide.defaultLevel,
+    INTENSITIES.find((it) => String(it) === searchParams.get("intensity")) ??
+      intensityGuide.defaultLevel,
   );
   /** 고지 확인을 마친 단계. 단계를 바꾸면 확인은 무효가 된다. */
   const [acknowledged, setAcknowledged] = useState<Intensity | null>(null);
