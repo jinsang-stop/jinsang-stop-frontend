@@ -24,6 +24,8 @@ export function useRecorder() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startedAtRef = useRef(0);
+  /** 녹음을 버렸는가 — 권한 대기 중에 버려지면 마이크를 열지 않는다. */
+  const discardedRef = useRef(false);
 
   useEffect(() => {
     if (status !== "recording") {
@@ -49,6 +51,7 @@ export function useRecorder() {
       return false;
     }
 
+    discardedRef.current = false;
     setStatus("requesting");
     let stream: MediaStream;
     try {
@@ -60,6 +63,11 @@ export function useRecorder() {
           ? "denied"
           : "unavailable",
       );
+      return false;
+    }
+    if (discardedRef.current) {
+      // 권한을 기다리는 사이 버려졌다(세션 중단 등) — 마이크를 열지 않고 닫는다.
+      stream.getTracks().forEach((track) => track.stop());
       return false;
     }
 
@@ -96,7 +104,23 @@ export function useRecorder() {
     });
   }, []);
 
-  return { status, error, elapsedMs, start, stop };
+  /** 녹음을 보내지 않고 버린다. 권한 대기 중이어도 마이크를 닫는다. */
+  const discard = useCallback(() => {
+    discardedRef.current = true;
+    const recorder = recorderRef.current;
+    if (recorder) {
+      recorder.onstop = null;
+      if (recorder.state !== "inactive") {
+        recorder.stop();
+      }
+      releaseStream(recorder);
+      recorderRef.current = null;
+    }
+    chunksRef.current = [];
+    setStatus("idle");
+  }, []);
+
+  return { status, error, elapsedMs, start, stop, discard };
 }
 
 function releaseStream(recorder: MediaRecorder | null) {
