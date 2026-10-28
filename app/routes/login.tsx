@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 
 import type { Route } from "./+types/login";
 import { login } from "~/auth/api";
@@ -81,6 +81,15 @@ export default function Login() {
         >
           {submitting ? "로그인 중…" : "로그인"}
         </button>
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          계정이 없나요?{" "}
+          <Link
+            to={`/signup?redirectTo=${encodeURIComponent(redirectTo)}`}
+            className="underline"
+          >
+            회원가입
+          </Link>
+        </p>
       </form>
     </Page>
   );
