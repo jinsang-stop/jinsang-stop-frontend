@@ -22,7 +22,7 @@ import type { Intensity } from "~/officialCard/types";
 
 /** 세션 시작 요청 — 카드 식별자 + `강도`. */
 export type TrainingSessionStartRequest = {
-  cardId: string;
+  cardId: number;
   intensity: Intensity;
 };
 

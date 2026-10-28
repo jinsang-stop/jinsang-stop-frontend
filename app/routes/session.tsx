@@ -6,7 +6,7 @@ import { ErrorNotice } from "~/components/ErrorNotice";
 import { Page } from "~/components/Page";
 import { fetchOfficialCard } from "~/officialCard/api";
 import { INTENSITIES } from "~/officialCard/types";
-import type { Intensity, OfficialCardDetail } from "~/officialCard/types";
+import type { Intensity, OfficialCard } from "~/officialCard/types";
 import { AttitudeScorePanel } from "~/trainingSession/AttitudeScorePanel";
 import type { ScoreStatus } from "~/trainingSession/AttitudeScorePanel";
 import { SpeakControl } from "~/trainingSession/SpeakControl";
@@ -41,7 +41,7 @@ export function HydrateFallback() {
 
 export default function Session({ loaderData }: Route.ComponentProps) {
   const { card, intensity } = loaderData;
-  const session = useTrainingSession(card.id, intensity);
+  const session = useTrainingSession(card.cardId, intensity);
   const recorder = useRecorder();
 
   const { phase } = session;
@@ -65,7 +65,7 @@ export default function Session({ loaderData }: Route.ComponentProps) {
       <SessionFrame card={card} intensity={intensity}>
         <StartFailed
           error={phase.error}
-          cardId={card.id}
+          cardId={card.cardId}
           onRetry={session.retryStart}
         />
       </SessionFrame>
@@ -112,7 +112,7 @@ export default function Session({ loaderData }: Route.ComponentProps) {
                 scores[turn.turnNumber] !== undefined &&
                 isUnscored(scores[turn.turnNumber]),
             }))}
-            complainantDisplayRole={card.complainantDisplayRole}
+            complainantDisplayRole={card.complainantRoleName}
             submitting={activity === "submitting"}
             speakingTurnNumber={session.speakingTurnNumber}
           />
@@ -130,7 +130,7 @@ export default function Session({ loaderData }: Route.ComponentProps) {
                   ? "complainantSpeech"
                   : null
             }
-            complainantDisplayRole={card.complainantDisplayRole}
+            complainantDisplayRole={card.complainantRoleName}
             onStart={startSpeaking}
             onStop={stopSpeaking}
           />
@@ -147,7 +147,7 @@ function SessionFrame({
   turnCount,
   children,
 }: {
-  card: OfficialCardDetail;
+  card: OfficialCard;
   intensity: Intensity;
   /** 지금까지 닫힌 `발화 턴` 수. 세션이 진행 중일 때만 보여준다. */
   turnCount?: number;
@@ -158,7 +158,7 @@ function SessionFrame({
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
           <Link
-            to={`/cards/${card.id}`}
+            to={`/cards/${card.cardId}`}
             className="text-sm text-gray-600 underline dark:text-gray-400"
           >
             ← 카드로
@@ -167,7 +167,7 @@ function SessionFrame({
             {card.name}
           </h1>
           <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-            상대: {card.complainantDisplayRole} · 강도 {intensity}단계
+            상대: {card.complainantRoleName} · 강도 {intensity}단계
           </p>
         </div>
         {turnCount !== undefined && (
@@ -190,7 +190,7 @@ function StartFailed({
   onRetry,
 }: {
   error: unknown;
-  cardId: string;
+  cardId: number;
   onRetry: () => void;
 }) {
   const inProgress =
@@ -244,7 +244,7 @@ function Aborted({
   intensity,
 }: {
   error: unknown;
-  card: OfficialCardDetail;
+  card: OfficialCard;
   intensity: Intensity;
 }) {
   return (
@@ -264,12 +264,12 @@ function Aborted({
       <div className="mt-5 flex flex-wrap items-center gap-4">
         {/* 같은 주소로 다시 들어가면 새 세션이 시작된다. */}
         <a
-          href={`/cards/${card.id}/session?intensity=${intensity}`}
+          href={`/cards/${card.cardId}/session?intensity=${intensity}`}
           className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300"
         >
           같은 설정으로 다시 시작
         </a>
-        <BackToCard cardId={card.id} />
+        <BackToCard cardId={card.cardId} />
       </div>
     </div>
   );

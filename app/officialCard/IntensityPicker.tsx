@@ -1,16 +1,15 @@
-import { INTENSITIES } from "./types";
-import type { Intensity, IntensityNotice } from "./types";
+import type { Intensity, IntensityGuide } from "./types";
 
 /**
- * `강도` 선택. 기본값은 1단계이고, 단계는 난이도가 아니라 `민원인`이 얼마나
- * 심하게 구는지를 뜻한다(CONTEXT.md).
+ * `강도` 선택. 단계는 난이도가 아니라 `민원인`이 얼마나 심하게 구는지를
+ * 뜻한다(CONTEXT.md). 단계 이름·허용 행동·공통 안내는 백엔드 문구를 쓴다.
  */
 export function IntensityPicker({
-  notices,
+  guide,
   selected,
   onSelect,
 }: {
-  notices: IntensityNotice[];
+  guide: IntensityGuide;
   selected: Intensity;
   onSelect: (intensity: Intensity) => void;
 }) {
@@ -24,12 +23,11 @@ export function IntensityPicker({
         연습하세요.
       </p>
       <div className="mt-4 space-y-3">
-        {INTENSITIES.map((intensity) => {
-          const notice = notices.find((it) => it.intensity === intensity);
-          const isSelected = selected === intensity;
+        {guide.levels.map((level) => {
+          const isSelected = selected === level.level;
           return (
             <label
-              key={intensity}
+              key={level.level}
               className={`flex cursor-pointer gap-3 rounded-lg border p-4 ${
                 isSelected
                   ? "border-gray-900 bg-gray-50 dark:border-gray-100 dark:bg-gray-900"
@@ -39,30 +37,31 @@ export function IntensityPicker({
               <input
                 type="radio"
                 name="intensity"
-                value={intensity}
+                value={level.level}
                 checked={isSelected}
-                onChange={() => onSelect(intensity)}
+                onChange={() => onSelect(level.level)}
                 className="mt-1"
               />
               <span>
                 <span className="font-medium text-gray-900 dark:text-gray-50">
-                  {intensity}단계
-                  {intensity === 1 && (
+                  {level.title}
+                  {level.level === guide.defaultLevel && (
                     <span className="ml-2 text-sm font-normal text-gray-500">
                       기본
                     </span>
                   )}
                 </span>
-                {notice && (
-                  <span className="mt-1 block text-sm text-gray-600 dark:text-gray-400">
-                    {notice.notice}
-                  </span>
-                )}
+                <span className="mt-1 block text-sm text-gray-600 dark:text-gray-400">
+                  {level.allowedBehaviors.join(" · ")}
+                </span>
               </span>
             </label>
           );
         })}
       </div>
+      <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">
+        {guide.commonNotice}
+      </p>
     </fieldset>
   );
 }

@@ -39,7 +39,7 @@ const SCORE_WAIT_LIMIT_MS = 60_000;
  * 점수는 턴 응답과 따로 받는다. 채점이 연기보다 늦게 끝날 수 있어서 턴 응답이
  * 오면 그 턴의 점수를 도착할 때까지 따로 묻는다(슬라이스 #6 공통 계약).
  */
-export function useTrainingSession(cardId: string, intensity: Intensity) {
+export function useTrainingSession(cardId: number, intensity: Intensity) {
   const [phase, setPhase] = useState<SessionPhase>({ kind: "starting" });
   const [activity, setActivity] = useState<SessionActivity>("ready");
   const [turns, setTurns] = useState<CompletedTurn[]>([]);
