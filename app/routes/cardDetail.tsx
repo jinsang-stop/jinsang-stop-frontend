@@ -65,6 +65,12 @@ export default function CardDetail({ loaderData }: Route.ComponentProps) {
       >
         ← 공식 카드 목록
       </Link>
+      <Link
+        to={`/cards/${card.cardId}/growth`}
+        className="ml-4 text-sm text-gray-600 underline dark:text-gray-400"
+      >
+        내 성장 기록
+      </Link>
 
       <dl className="mt-6 grid grid-cols-2 gap-4 rounded-lg border border-gray-200 p-5 text-sm dark:border-gray-800">
         <div>
