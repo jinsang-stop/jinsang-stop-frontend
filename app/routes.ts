@@ -13,5 +13,6 @@ export default [
     index("routes/cards.tsx"),
     route("cards/:cardId", "routes/cardDetail.tsx"),
     route("cards/:cardId/session", "routes/session.tsx"),
+    route("sessions/:sessionId/report", "routes/sessionReport.tsx"),
   ]),
 ] satisfies RouteConfig;

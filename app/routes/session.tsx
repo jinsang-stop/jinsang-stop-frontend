@@ -93,7 +93,12 @@ export default function Session({ loaderData }: Route.ComponentProps) {
   if (phase.kind === "aborted") {
     return (
       <SessionFrame card={card} intensity={intensity}>
-        <Aborted error={phase.error} card={card} intensity={intensity} />
+        <Aborted
+          error={phase.error}
+          sessionId={phase.sessionId}
+          card={card}
+          intensity={intensity}
+        />
       </SessionFrame>
     );
   }
@@ -102,6 +107,7 @@ export default function Session({ loaderData }: Route.ComponentProps) {
     return (
       <SessionFrame card={card} intensity={intensity}>
         <Ended
+          sessionId={phase.sessionId}
           status={phase.status}
           turnsToCalm={phase.turnsToCalm}
           card={card}
@@ -365,10 +371,12 @@ function OwnSessionInProgress({
 
 function Aborted({
   error,
+  sessionId,
   card,
   intensity,
 }: {
   error: unknown;
+  sessionId: number;
   card: OfficialCard;
   intensity: Intensity;
 }) {
@@ -387,6 +395,7 @@ function Aborted({
         사용자의 응대 때문이 아닙니다. 이 세션은 성장 기록에 들어가지 않습니다.
       </p>
       <div className="mt-5 flex flex-wrap items-center gap-4">
+        <ReportLink sessionId={sessionId} />
         <RestartLink card={card} intensity={intensity} />
         <BackToCard cardId={card.cardId} />
       </div>
@@ -396,11 +405,13 @@ function Aborted({
 
 /** 종료 사유별 종료 화면. 사유마다 제목·설명·강조색이 다르다. */
 function Ended({
+  sessionId,
   status,
   turnsToCalm,
   card,
   intensity,
 }: {
+  sessionId: number;
   status: TrainingSessionStatus;
   turnsToCalm: number | null;
   card: OfficialCard;
@@ -420,6 +431,7 @@ function Ended({
       )}
       <p className="mt-3">{view.description}</p>
       <div className="mt-6 flex flex-wrap items-center gap-4">
+        <ReportLink sessionId={sessionId} />
         <RestartLink card={card} intensity={intensity} />
         <BackToCard cardId={card.cardId} />
       </div>
@@ -516,6 +528,17 @@ function TurnNotice({
   return <ErrorNotice error={notice.error} />;
 }
 
+function ReportLink({ sessionId }: { sessionId: number }) {
+  return (
+    <Link
+      to={`/sessions/${sessionId}/report`}
+      className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300"
+    >
+      리포트 보기
+    </Link>
+  );
+}
+
 function RestartLink({
   card,
   intensity,
@@ -527,7 +550,7 @@ function RestartLink({
     // 같은 주소로 다시 들어가면 새 세션이 시작된다.
     <a
       href={`/cards/${card.cardId}/session?intensity=${intensity}`}
-      className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-300"
+      className="rounded-md border border-current/20 px-4 py-2 text-sm font-medium hover:bg-black/5 dark:hover:bg-white/10"
     >
       같은 설정으로 다시 시작
     </a>
