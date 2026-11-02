@@ -1,162 +1,292 @@
 import { ApiError } from "~/api/errors";
+import { MOCK_OFFICIAL_CARDS } from "~/officialCard/mock";
+import type { Intensity } from "~/officialCard/types";
 import { TrainingSessionErrorCode } from "./types";
 import type {
   AttitudeAxis,
+  AxisScore,
+  TrainingSession,
   TrainingSessionStartRequest,
-  TrainingSessionStarted,
   TurnScore,
   UtteranceTurnResult,
 } from "./types";
 
 /**
- * 백엔드 세션·턴·점수 API(jinsang-stop-backend#3 · #4 · #5)가 아직 없어서 세션
- * 화면을 먼저 세우기 위한 임시 구현. `VITE_USE_MOCK_API=true`일 때만 쓰인다.
+ * 백엔드 없이 세션 화면을 보기 위한 임시 구현. `VITE_USE_MOCK_API=true`일 때만
+ * 쓰인다. 응답 모양과 오류 코드는 백엔드 `/api/training-sessions`와 같게 둔다.
  *
- * 세션 화면 주소에 `?mock=<시나리오>`를 붙이면 상태별 화면을 재현할 수 있다.
+ * 세션 화면 주소에 `&mock=<시나리오>`를 붙이면 상태별 화면을 재현할 수 있다.
  * | 값 | 재현하는 것 |
  * |---|---|
  * | `busy` | 다른 사람이 훈련 중이라 시작 거절 |
+ * | `mine` | 내 세션이 이미 진행 중 — 이어 하기 / 중단하고 새로 시작 |
  * | `not-ready` | 훈련 환경 미준비로 시작 거절 |
+ * | `not-ready-turn` | 2턴 첫 제출이 환경 미준비 — 같은 녹음으로 다시 보낼 수 있다 |
  * | `empty` | 2턴 첫 제출이 빈 전사 — 턴 번호가 늘지 않는다 |
  * | `unscored` | 2턴이 채점되지 않음 |
  * | `abort` | 2턴에서 "시스템 오류로 중단" |
+ * | `calm` | 3턴에서 진정 종료 |
  *
- * 백엔드 API가 열리면 이 파일을 지운다.
+ * 1턴 점수는 턴 응답에 바로 실리고, 2턴부터는 `PENDING`으로 왔다가 점수 조회로 받는다.
  */
-type MockScenario = "busy" | "not-ready" | "empty" | "unscored" | "abort";
+type MockScenario =
+  | "busy"
+  | "mine"
+  | "not-ready"
+  | "not-ready-turn"
+  | "empty"
+  | "unscored"
+  | "abort"
+  | "calm";
+
+const SCENARIOS: readonly MockScenario[] = [
+  "busy",
+  "mine",
+  "not-ready",
+  "not-ready-turn",
+  "empty",
+  "unscored",
+  "abort",
+  "calm",
+];
 
 type MockSession = {
+  session: TrainingSession;
   scenario: MockScenario | null;
-  turnCount: number;
-  emptyTranscriptShown: boolean;
+  /** 한 번만 보여 줄 실패를 이미 보여 줬는가. */
+  failureShown: boolean;
   /** 턴 번호 → 점수가 "도착"하는 시각. 점수가 턴 응답보다 늦게 오는 것을 흉내 낸다. */
   scoreReadyAt: Map<number, number>;
 };
 
-const sessions = new Map<string, MockSession>();
+const sessions = new Map<number, MockSession>();
+let nextSessionId = 1;
+/** `mine` 시나리오에서 이미 진행 중인 내 세션. 중단하면 사라진다. */
+let mineSessionId: number | null = null;
 
 const SUBMIT_DELAY_MS = 1500;
 const SCORE_DELAY_MS = 1800;
 
 export async function mockStartTrainingSession(
-  _request: TrainingSessionStartRequest,
-): Promise<TrainingSessionStarted> {
+  request: TrainingSessionStartRequest,
+): Promise<TrainingSession> {
   await wait(700);
   const scenario = readScenario();
-  if (scenario === "busy") {
+  if (scenario === "busy" || (scenario === "mine" && ensureMineSession())) {
     throw new ApiError(
       409,
-      TrainingSessionErrorCode.sessionInProgress,
-      "지금 다른 사람이 훈련 중입니다. 그 훈련이 끝나면 시작할 수 있습니다.",
+      TrainingSessionErrorCode.busy,
+      "다른 훈련이 진행 중입니다. 잠시 후 다시 시도해 주세요.",
     );
   }
   if (scenario === "not-ready") {
-    throw new ApiError(
-      503,
-      TrainingSessionErrorCode.environmentNotReady,
-      "훈련 환경이 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.",
-    );
+    throw notReady();
   }
-  const sessionId = `mock-${Date.now()}`;
-  sessions.set(sessionId, {
-    scenario,
-    turnCount: 0,
-    emptyTranscriptShown: false,
-    scoreReadyAt: new Map(),
-  });
-  return { sessionId };
+  return createSession(request.cardId, request.intensity, scenario).session;
+}
+
+export async function mockFetchCurrentTrainingSession(): Promise<TrainingSession | null> {
+  await wait(200);
+  if (readScenario() === "mine" && mineSessionId !== null) {
+    return { ...findSession(mineSessionId).session };
+  }
+  return null;
+}
+
+export async function mockAbortTrainingSession(
+  sessionId: number,
+): Promise<TrainingSession> {
+  await wait(300);
+  const mock = findSession(sessionId);
+  mock.session = {
+    ...mock.session,
+    status: "ABORTED",
+    endedAt: new Date().toISOString(),
+  };
+  if (mineSessionId === sessionId) {
+    mineSessionId = null;
+  }
+  return { ...mock.session };
 }
 
 export async function mockSubmitUtteranceTurn(
-  sessionId: string,
+  sessionId: number,
   _audio: Blob,
 ): Promise<UtteranceTurnResult> {
   await wait(SUBMIT_DELAY_MS);
-  const session = findSession(sessionId);
+  const mock = findSession(sessionId);
+  const { session, scenario } = mock;
+  if (session.status !== "IN_PROGRESS") {
+    throw new ApiError(
+      409,
+      "TRAINING_SESSION_NOT_IN_PROGRESS",
+      "이미 끝난 훈련 세션입니다.",
+    );
+  }
   const turnNumber = session.turnCount + 1;
 
-  if (
-    session.scenario === "empty" &&
-    turnNumber === 2 &&
-    !session.emptyTranscriptShown
-  ) {
-    session.emptyTranscriptShown = true;
-    throw new ApiError(
-      422,
-      TrainingSessionErrorCode.emptyTranscript,
-      "말씀을 알아듣지 못했습니다. 다시 말해 주세요.",
-    );
+  if (turnNumber === 2 && !mock.failureShown) {
+    if (scenario === "empty") {
+      mock.failureShown = true;
+      throw new ApiError(
+        422,
+        TrainingSessionErrorCode.emptyTranscript,
+        "말소리가 들리지 않았어요. 다시 말해 주세요.",
+      );
+    }
+    if (scenario === "not-ready-turn") {
+      mock.failureShown = true;
+      throw notReady();
+    }
   }
-  if (session.scenario === "abort" && turnNumber === 2) {
-    sessions.delete(sessionId);
+  if (scenario === "abort" && turnNumber === 2) {
+    mock.session = { ...session, status: "SYSTEM_ERROR" };
     throw new ApiError(
       500,
-      TrainingSessionErrorCode.abortedBySystemError,
-      "시스템 오류로 훈련을 중단했습니다.",
+      TrainingSessionErrorCode.endedBySystemError,
+      "일시적인 문제로 훈련을 이어갈 수 없어 종료했습니다. 새 훈련을 시작해 주세요.",
     );
   }
 
-  session.turnCount = turnNumber;
-  session.scoreReadyAt.set(turnNumber, Date.now() + SCORE_DELAY_MS);
+  const calmed = scenario === "calm" && turnNumber === 3;
+  const sessionStatus = calmed
+    ? "CALMED"
+    : turnNumber >= session.hardTurnLimit
+      ? "TURN_LIMIT_REACHED"
+      : "IN_PROGRESS";
+  mock.session = {
+    ...session,
+    turnCount: turnNumber,
+    status: sessionStatus,
+    turnsToCalm: calmed ? turnNumber : null,
+  };
 
-  const line = MOCK_COMPLAINANT_LINES[(turnNumber - 1) % MOCK_COMPLAINANT_LINES.length];
+  const lines = calmed ? MOCK_CALMED_LINES : MOCK_COMPLAINANT_LINES;
+  const line = lines[(turnNumber - 1) % lines.length];
+  let score: TurnScore;
+  if (turnNumber === 1) {
+    score = scoreOf(mock, turnNumber);
+  } else {
+    mock.scoreReadyAt.set(turnNumber, Date.now() + SCORE_DELAY_MS);
+    score = pending(turnNumber);
+  }
   return {
+    sessionId,
     turnNumber,
-    transcript: MOCK_TRANSCRIPTS[(turnNumber - 1) % MOCK_TRANSCRIPTS.length],
+    userTranscript: MOCK_TRANSCRIPTS[(turnNumber - 1) % MOCK_TRANSCRIPTS.length],
     complainantLine: line,
+    calmed,
     complainantAudio: silentWavBase64(Math.min(1500 + line.length * 80, 6000)),
-    complainantAudioMimeType: "audio/wav",
-    calmedDown: false,
+    complainantAudioContentType: "audio/wav",
+    score,
+    sessionStatus,
+    turnsToCalm: calmed ? turnNumber : null,
   };
 }
 
 export async function mockFetchTurnScore(
-  sessionId: string,
+  sessionId: number,
   turnNumber: number,
-): Promise<TurnScore | null> {
+): Promise<TurnScore> {
   await wait(150);
-  const session = findSession(sessionId);
-  const readyAt = session.scoreReadyAt.get(turnNumber);
-  if (readyAt === undefined || Date.now() < readyAt) {
-    return null;
+  const mock = findSession(sessionId);
+  if (turnNumber < 1 || turnNumber > mock.session.turnCount) {
+    throw new ApiError(404, "TURN_NOT_FOUND", "발화 턴을 찾을 수 없습니다.");
   }
-  if (session.scenario === "unscored" && turnNumber === 2) {
-    return {
-      turnNumber,
-      axes: {
-        emotionalStability: { score: null, rationale: null },
-        empathyAcknowledgement: { score: null, rationale: null },
-        boundarySetting: { score: null, rationale: null },
-      },
-    };
+  const readyAt = mock.scoreReadyAt.get(turnNumber) ?? 0;
+  if (Date.now() < readyAt) {
+    return pending(turnNumber);
   }
-  return { turnNumber, axes: mockAxes(turnNumber) };
+  return scoreOf(mock, turnNumber);
 }
 
-function mockAxes(turnNumber: number): TurnScore["axes"] {
-  const at = (axis: AttitudeAxis, base: number, step: number) => {
-    const score = Math.max(0, Math.min(100, base + step * turnNumber));
-    return { score, rationale: MOCK_RATIONALES[axis][(turnNumber - 1) % 2] };
+function createSession(
+  cardId: number,
+  intensity: Intensity,
+  scenario: MockScenario | null,
+  turnCount = 0,
+): MockSession {
+  const card = MOCK_OFFICIAL_CARDS.find((it) => it.cardId === cardId);
+  if (!card) {
+    throw new ApiError(404, "CARD_NOT_FOUND", "시나리오 카드를 찾을 수 없습니다.");
+  }
+  const mock: MockSession = {
+    session: {
+      sessionId: nextSessionId++,
+      cardId,
+      complainantRoleName: card.complainantRoleName,
+      intensity,
+      hardTurnLimit: card.hardTurnLimit,
+      status: "IN_PROGRESS",
+      turnCount,
+      startedAt: new Date().toISOString(),
+      turnsToCalm: null,
+      endedAt: null,
+    },
+    scenario,
+    failureShown: false,
+    scoreReadyAt: new Map(),
   };
+  sessions.set(mock.session.sessionId, mock);
+  return mock;
+}
+
+/** `mine` 시나리오의 내 세션을 한 번 만들어 둔다. 중단했으면 더 만들지 않는다. */
+function ensureMineSession(): boolean {
+  if (mineSessionId === null && !sessions.size) {
+    mineSessionId = createSession(1, 1, null, 2).session.sessionId;
+  }
+  return mineSessionId !== null;
+}
+
+function scoreOf(mock: MockSession, turnNumber: number): TurnScore {
+  if (mock.scenario === "unscored" && turnNumber === 2) {
+    return { ...pending(turnNumber), status: "FAILED" };
+  }
+  return { turnNumber, status: "SCORED", ...mockAxes(turnNumber) };
+}
+
+function pending(turnNumber: number): TurnScore {
   return {
-    emotionalStability: at("emotionalStability", 58, 6),
-    empathyAcknowledgement: at("empathyAcknowledgement", 35, 11),
-    boundarySetting: at("boundarySetting", 70, -4),
+    turnNumber,
+    status: "PENDING",
+    emotionalStability: null,
+    empathyAcknowledgement: null,
+    boundarySetting: null,
   };
 }
 
-function findSession(sessionId: string): MockSession {
-  const session = sessions.get(sessionId);
-  if (!session) {
-    throw new ApiError(404, "TRAINING_SESSION_NOT_FOUND", "세션을 찾을 수 없습니다.");
+function mockAxes(turnNumber: number): Record<AttitudeAxis, AxisScore> {
+  const at = (axis: AttitudeAxis, base: number, step: number): AxisScore => ({
+    score: Math.max(1, Math.min(5, Math.round(base + step * (turnNumber - 1)))),
+    reason: MOCK_REASONS[axis][(turnNumber - 1) % 2],
+  });
+  return {
+    emotionalStability: at("emotionalStability", 3, 0.5),
+    empathyAcknowledgement: at("empathyAcknowledgement", 2, 1),
+    boundarySetting: at("boundarySetting", 4, -0.5),
+  };
+}
+
+function notReady(): ApiError {
+  return new ApiError(
+    503,
+    TrainingSessionErrorCode.environmentNotReady,
+    "훈련 환경이 준비되지 않았습니다. 잠시 후 다시 시도해 주세요.",
+  );
+}
+
+function findSession(sessionId: number): MockSession {
+  const mock = sessions.get(sessionId);
+  if (!mock) {
+    throw new ApiError(404, "TRAINING_SESSION_NOT_FOUND", "훈련 세션을 찾을 수 없습니다.");
   }
-  return session;
+  return mock;
 }
 
 function readScenario(): MockScenario | null {
   const value = new URLSearchParams(window.location.search).get("mock");
-  const known: MockScenario[] = ["busy", "not-ready", "empty", "unscored", "abort"];
-  return known.find((it) => it === value) ?? null;
+  return SCENARIOS.find((it) => it === value) ?? null;
 }
 
 function wait(ms: number): Promise<void> {
@@ -193,30 +323,35 @@ function silentWavBase64(durationMs: number): string {
 }
 
 const MOCK_TRANSCRIPTS = [
-  "죄송합니다 손님, 어떤 부분이 불편하셨는지 말씀해 주시겠어요?",
-  "기다리시게 해서 정말 불편하셨을 것 같아요. 다만 구매하신 지 두 달이 지나서 환불은 어렵습니다.",
-  "대신 교환이나 수선이 가능한지 확인해 드릴 수 있어요.",
-  "책임자분께 전달은 해 드리겠지만, 환불 기준은 동일하게 적용됩니다.",
+  "불편을 드려 죄송합니다 손님, 어떤 점이 문제였는지 말씀해 주시겠어요?",
+  "상한 음식을 드셨다니 많이 놀라셨겠어요. 다만 영수증이 없으면 현금 환불은 어렵습니다.",
+  "대신 결제 내역을 같이 찾아보거나 같은 상품으로 교환해 드릴 수 있어요.",
+  "점장님께 전달은 해 드리겠지만, 환불 기준은 똑같이 적용됩니다.",
 ];
 
 const MOCK_COMPLAINANT_LINES = [
-  "아니, 산 지 얼마나 됐다고 이게 벌써 망가져요? 당장 환불해 줘요.",
-  "두 달이 뭐가 길어요? 다른 매장은 다 해 주던데 여기만 왜 이래요!",
+  "아니, 어제 산 도시락이 이렇게 상해 있는데 말이 돼요? 당장 현금으로 돌려줘요.",
+  "영수증이 뭐가 중요해요? 내가 여기서 샀다니까요!",
   "교환은 필요 없다니까요. 내 말을 듣긴 하는 거예요?",
-  "……알겠어요. 그럼 교환 쪽으로 한번 알아봐 줘요.",
+  "그러니까 결국 안 해 주겠다는 거잖아요.",
 ];
 
-const MOCK_RATIONALES: Record<AttitudeAxis, [string, string]> = {
+const MOCK_CALMED_LINES = [
+  ...MOCK_COMPLAINANT_LINES.slice(0, 2),
+  "……알겠어요. 그럼 결제 내역부터 한번 찾아봐 줘요.",
+];
+
+const MOCK_REASONS: Record<AttitudeAxis, [string, string]> = {
   emotionalStability: [
-    "언성이 높아진 뒤에도 같은 속도와 어조를 유지했습니다.",
-    "비교하는 말에 반박하지 않고 차분히 이어 갔습니다.",
+    "언성이 높아진 뒤에도 같은 속도와 어조를 유지했다.",
+    "몰아붙이는 말에 반박하지 않고 차분히 이어 갔다.",
   ],
   empathyAcknowledgement: [
-    "요구를 판단하기 전에 불편했던 점을 먼저 물었습니다.",
-    "기다린 데 대한 감정을 말로 받아 주었습니다.",
+    "요구를 판단하기 전에 불편했던 점을 먼저 물었다.",
+    "놀랐을 감정을 말로 받아 주었다.",
   ],
   boundarySetting: [
-    "환불이 어렵다는 점을 돌려 말하지 않고 전했습니다.",
-    "기준을 되풀이했지만 대안 제시가 늦었습니다.",
+    "환불이 어렵다는 점을 돌려 말하지 않고 전했다.",
+    "기준을 되풀이했지만 대안 제시가 늦었다.",
   ],
 };

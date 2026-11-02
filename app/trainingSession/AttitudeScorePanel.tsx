@@ -12,7 +12,7 @@ import type { TurnScore } from "./types";
  * - `scored`: 그 턴의 점수가 표시되고 있다.
  * - `unscored`: 그 턴은 채점되지 않았다. 마지막 성공값을 유지한다.
  */
-export type ScoreStatus =
+export type ScorePanelStatus =
   | { kind: "waiting" }
   | { kind: "pending"; turnNumber: number }
   | { kind: "scored"; turnNumber: number }
@@ -29,7 +29,7 @@ export function AttitudeScorePanel({
   latest,
   previous,
 }: {
-  status: ScoreStatus;
+  status: ScorePanelStatus;
   /** 마지막으로 채점에 성공한 턴의 점수. 없으면 세 축 모두 `정보 없음`이다. */
   latest: TurnScore | null;
   /** 그 직전에 채점에 성공한 턴의 점수 — 변화량 표시에 쓴다. */
@@ -63,9 +63,9 @@ export function AttitudeScorePanel({
 
       <ul className="mt-4 grid grid-cols-3 gap-4 sm:gap-6">
         {ATTITUDE_AXES.map(({ axis, label }) => {
-          const current = latest?.axes[axis];
+          const current = latest?.[axis];
           const score = current?.score ?? null;
-          const before = previous?.axes[axis].score ?? null;
+          const before = previous?.[axis]?.score ?? null;
           const delta = score !== null && before !== null ? score - before : null;
           return (
             <li key={axis}>
@@ -114,13 +114,13 @@ export function AttitudeScorePanel({
                   />
                 )}
               </div>
-              {current?.rationale && (
+              {current?.reason && (
                 <p
                   className={`mt-1.5 hidden text-xs text-gray-600 sm:block dark:text-gray-400 ${
                     stale ? "opacity-60" : ""
                   }`}
                 >
-                  {current.rationale}
+                  {current.reason}
                 </p>
               )}
             </li>
@@ -135,7 +135,7 @@ function StatusLabel({
   status,
   latest,
 }: {
-  status: ScoreStatus;
+  status: ScorePanelStatus;
   latest: TurnScore | null;
 }) {
   const className = "text-xs text-gray-500";

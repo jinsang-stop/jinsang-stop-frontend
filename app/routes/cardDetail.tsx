@@ -4,10 +4,10 @@ import { Link, useNavigate, useRevalidator } from "react-router";
 import type { Route } from "./+types/cardDetail";
 import { ErrorNotice } from "~/components/ErrorNotice";
 import { Page } from "~/components/Page";
-import { fetchOfficialCard } from "~/officialCard/api";
+import { fetchIntensityGuide, fetchOfficialCard } from "~/officialCard/api";
 import { IntensityNoticeDialog } from "~/officialCard/IntensityNoticeDialog";
 import { IntensityPicker } from "~/officialCard/IntensityPicker";
-import { DEFAULT_INTENSITY, findNotice } from "~/officialCard/types";
+import { findLevel } from "~/officialCard/types";
 import type { Intensity } from "~/officialCard/types";
 
 export function meta(_: Route.MetaArgs) {
@@ -15,7 +15,11 @@ export function meta(_: Route.MetaArgs) {
 }
 
 export async function clientLoader({ params }: Route.ClientLoaderArgs) {
-  return { card: await fetchOfficialCard(params.cardId) };
+  const [card, intensityGuide] = await Promise.all([
+    fetchOfficialCard(params.cardId),
+    fetchIntensityGuide(),
+  ]);
+  return { card, intensityGuide };
 }
 
 export function HydrateFallback() {
@@ -23,17 +27,19 @@ export function HydrateFallback() {
 }
 
 export default function CardDetail({ loaderData }: Route.ComponentProps) {
-  const { card } = loaderData;
+  const { card, intensityGuide } = loaderData;
   const navigate = useNavigate();
 
-  const [intensity, setIntensity] = useState<Intensity>(DEFAULT_INTENSITY);
+  const [intensity, setIntensity] = useState<Intensity>(
+    intensityGuide.defaultLevel,
+  );
   /** 고지 확인을 마친 단계. 단계를 바꾸면 확인은 무효가 된다. */
   const [acknowledged, setAcknowledged] = useState<Intensity | null>(null);
   const [noticeOpen, setNoticeOpen] = useState(false);
 
-  const notice = findNotice(card, intensity);
+  const level = findLevel(intensityGuide, intensity);
   const needsAcknowledgement =
-    notice?.acknowledgementRequired === true && acknowledged !== intensity;
+    level?.requiresConsent === true && acknowledged !== intensity;
 
   function selectIntensity(next: Intensity) {
     setIntensity(next);
@@ -45,7 +51,7 @@ export default function CardDetail({ loaderData }: Route.ComponentProps) {
       setNoticeOpen(true);
       return;
     }
-    navigate(`/cards/${card.id}/session?intensity=${intensity}`);
+    navigate(`/cards/${card.cardId}/session?intensity=${intensity}`);
   }
 
   return (
@@ -61,7 +67,7 @@ export default function CardDetail({ loaderData }: Route.ComponentProps) {
         <div>
           <dt className="text-gray-500">상대</dt>
           <dd className="mt-1 font-medium text-gray-900 dark:text-gray-50">
-            {card.complainantDisplayRole}
+            {card.complainantRoleName}
           </dd>
         </div>
         <div>
@@ -74,7 +80,7 @@ export default function CardDetail({ loaderData }: Route.ComponentProps) {
 
       <div className="mt-8">
         <IntensityPicker
-          notices={card.intensityNotices}
+          guide={intensityGuide}
           selected={intensity}
           onSelect={selectIntensity}
         />
@@ -95,14 +101,15 @@ export default function CardDetail({ loaderData }: Route.ComponentProps) {
         )}
       </div>
 
-      {noticeOpen && notice && (
+      {noticeOpen && level && (
         <IntensityNoticeDialog
-          notice={notice}
+          level={level}
+          commonNotice={intensityGuide.commonNotice}
           onCancel={() => setNoticeOpen(false)}
           onAcknowledge={() => {
             setAcknowledged(intensity);
             setNoticeOpen(false);
-            navigate(`/cards/${card.id}/session?intensity=${intensity}`);
+            navigate(`/cards/${card.cardId}/session?intensity=${intensity}`);
           }}
         />
       )}

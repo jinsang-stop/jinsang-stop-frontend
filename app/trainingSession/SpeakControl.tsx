@@ -11,7 +11,7 @@ export function SpeakControl({
   recorderError,
   elapsedMs,
   waitingFor,
-  complainantDisplayRole,
+  complainantRoleName,
   onStart,
   onStop,
 }: {
@@ -20,7 +20,7 @@ export function SpeakControl({
   elapsedMs: number;
   /** 새 턴을 막고 있는 것. 없으면 말할 수 있다. */
   waitingFor: "response" | "complainantSpeech" | null;
-  complainantDisplayRole: string;
+  complainantRoleName: string;
   onStart: () => void;
   onStop: () => void;
 }) {
@@ -55,8 +55,8 @@ export function SpeakControl({
         >
           <span className="size-2 animate-pulse rounded-full bg-gray-400" />
           {waitingFor === "response"
-            ? `${complainantDisplayRole}의 응답을 기다리는 중…`
-            : `${complainantDisplayRole}의 말을 듣는 중입니다. 말이 끝나면 이어서 말할 수 있습니다.`}
+            ? `${complainantRoleName}의 응답을 기다리는 중…`
+            : `${complainantRoleName}의 말을 듣는 중입니다. 말이 끝나면 이어서 말할 수 있습니다.`}
         </p>
       ) : (
         <button

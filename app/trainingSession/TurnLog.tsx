@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 /** 대화 기록에 쌓이는 `발화 턴` 하나 — 사용자 발화 1 : `민원인` 응답 1 (ADR-0001). */
 export type TurnLogEntry = {
   turnNumber: number;
-  transcript: string;
+  userTranscript: string;
   complainantLine: string;
   /** 그 턴이 채점되지 않았는가. 점수가 아직 오지 않았으면 `false`다. */
   unscored: boolean;
@@ -15,12 +15,12 @@ export type TurnLogEntry = {
  */
 export function TurnLog({
   entries,
-  complainantDisplayRole,
+  complainantRoleName,
   submitting,
   speakingTurnNumber,
 }: {
   entries: TurnLogEntry[];
-  complainantDisplayRole: string;
+  complainantRoleName: string;
   /** 턴을 제출하고 응답을 기다리는 중인가. */
   submitting: boolean;
   /** `민원인` 음성이 재생 중인 턴. */
@@ -39,7 +39,7 @@ export function TurnLog({
           대화를 시작할 준비가 됐습니다.
         </p>
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          「말하기 시작」을 누르고 {complainantDisplayRole}에게 먼저 말을 건네
+          「말하기 시작」을 누르고 {complainantRoleName}에게 먼저 말을 건네
           보세요. 다 말했으면 「말하기 끝내기」를 누릅니다.
         </p>
       </div>
@@ -52,10 +52,10 @@ export function TurnLog({
         <li key={entry.turnNumber} className="space-y-3">
           <TurnDivider turnNumber={entry.turnNumber} unscored={entry.unscored} />
           <Bubble speaker="나" side="right">
-            {entry.transcript}
+            {entry.userTranscript}
           </Bubble>
           <Bubble
-            speaker={complainantDisplayRole}
+            speaker={complainantRoleName}
             side="left"
             speaking={speakingTurnNumber === entry.turnNumber}
           >
@@ -69,7 +69,7 @@ export function TurnLog({
           <Bubble speaker="나" side="right" placeholder>
             말한 내용을 옮겨 적는 중…
           </Bubble>
-          <Bubble speaker={complainantDisplayRole} side="left" placeholder>
+          <Bubble speaker={complainantRoleName} side="left" placeholder>
             응답을 기다리는 중…
           </Bubble>
         </li>

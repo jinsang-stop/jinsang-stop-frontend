@@ -36,9 +36,9 @@ export default function Cards({ loaderData }: Route.ComponentProps) {
       ) : (
         <ul className="space-y-3">
           {cards.map((card) => (
-            <li key={card.id}>
+            <li key={card.cardId}>
               <Link
-                to={`/cards/${card.id}`}
+                to={`/cards/${card.cardId}`}
                 className="block rounded-lg border border-gray-200 p-5 hover:border-gray-400 dark:border-gray-800 dark:hover:border-gray-600"
               >
                 <h2 className="font-semibold text-gray-900 dark:text-gray-50">
@@ -48,7 +48,7 @@ export default function Cards({ loaderData }: Route.ComponentProps) {
                   {card.situation}
                 </p>
                 <p className="mt-3 text-xs text-gray-500">
-                  {card.complainantDisplayRole} · 최대 {card.hardTurnLimit}턴
+                  {card.complainantRoleName} · 최대 {card.hardTurnLimit}턴
                 </p>
               </Link>
             </li>

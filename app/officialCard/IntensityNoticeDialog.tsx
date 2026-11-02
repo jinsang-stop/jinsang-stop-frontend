@@ -1,15 +1,17 @@
-import type { IntensityNotice } from "./types";
+import type { IntensityLevel } from "./types";
 
 /**
  * 2단계 이상 시작 전 고지 확인(ADR-0005).
  * 확인하지 않으면 다음으로 넘어갈 수 없다 — 취소만 가능하다.
  */
 export function IntensityNoticeDialog({
-  notice,
+  level,
+  commonNotice,
   onAcknowledge,
   onCancel,
 }: {
-  notice: IntensityNotice;
+  level: IntensityLevel;
+  commonNotice: string;
   onAcknowledge: () => void;
   onCancel: () => void;
 }) {
@@ -25,11 +27,18 @@ export function IntensityNoticeDialog({
           id="intensity-notice-title"
           className="text-lg font-bold text-gray-900 dark:text-gray-50"
         >
-          강도 {notice.intensity}단계 고지
+          {level.title} 고지
         </h2>
-        <p className="mt-3 text-gray-700 dark:text-gray-300">{notice.notice}</p>
         <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">
-          훈련 중에는 언제든 한 번의 조작으로 중단할 수 있습니다.
+          이 단계에서 민원인은 다음과 같이 행동할 수 있습니다.
+        </p>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-gray-700 dark:text-gray-300">
+          {level.allowedBehaviors.map((behavior) => (
+            <li key={behavior}>{behavior}</li>
+          ))}
+        </ul>
+        <p className="mt-3 text-sm text-gray-600 dark:text-gray-400">
+          {commonNotice}
         </p>
         <div className="mt-6 flex justify-end gap-2">
           <button
