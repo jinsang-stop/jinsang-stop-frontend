@@ -126,12 +126,19 @@ export default function Session({ loaderData }: Route.ComponentProps) {
     }
   }
 
+  /** 녹음 중이면 녹음을 버리고(전송하지 않는다) 세션을 끝낸다. */
+  function abort() {
+    recorder.discard();
+    void session.abort();
+  }
+
   return (
     <SessionFrame
       card={card}
       intensity={intensity}
       turnCount={turnCount}
       hardTurnLimit={phase.session.hardTurnLimit}
+      onAbort={abort}
     >
       <AttitudeScorePanel {...scoreView} />
 
@@ -189,6 +196,7 @@ function SessionFrame({
   intensity,
   turnCount,
   hardTurnLimit,
+  onAbort,
   children,
 }: {
   card: OfficialCard;
@@ -196,6 +204,8 @@ function SessionFrame({
   /** 지금까지 확정된 `발화 턴` 수. 세션이 진행 중일 때만 보여준다. */
   turnCount?: number;
   hardTurnLimit?: number;
+  /** 진행 중일 때만 넘긴다 — 중단 버튼을 보여준다. */
+  onAbort?: () => void;
   children: React.ReactNode;
 }) {
   return (
@@ -215,14 +225,26 @@ function SessionFrame({
             상대: {card.complainantRoleName} · 강도 {intensity}단계
           </p>
         </div>
-        {turnCount !== undefined && (
-          <p className="rounded-full border border-gray-200 px-3 py-1 text-sm tabular-nums text-gray-700 dark:border-gray-800 dark:text-gray-300">
-            <span className="font-semibold text-gray-900 dark:text-gray-50">
-              {turnCount}
-            </span>{" "}
-            / {hardTurnLimit ?? card.hardTurnLimit}턴
-          </p>
-        )}
+        <div className="flex items-center gap-3">
+          {turnCount !== undefined && (
+            <p className="rounded-full border border-gray-200 px-3 py-1 text-sm tabular-nums text-gray-700 dark:border-gray-800 dark:text-gray-300">
+              <span className="font-semibold text-gray-900 dark:text-gray-50">
+                {turnCount}
+              </span>{" "}
+              / {hardTurnLimit ?? card.hardTurnLimit}턴
+            </p>
+          )}
+          {onAbort && (
+            // 확인창 없이 한 번에 끝낸다(ADR-0005 — 언제든 즉시 중단).
+            <button
+              type="button"
+              onClick={onAbort}
+              className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-950"
+            >
+              훈련 중단
+            </button>
+          )}
+        </div>
       </header>
       {children}
     </main>
@@ -372,7 +394,7 @@ function Aborted({
   );
 }
 
-/** 진정 종료 · 턴 상한 도달. 리포트로 이어지는 종료 화면은 #6에서 채운다. */
+/** 종료 사유별 종료 화면. 사유마다 제목·설명·강조색이 다르다. */
 function Ended({
   status,
   turnsToCalm,
@@ -384,26 +406,69 @@ function Ended({
   card: OfficialCard;
   intensity: Intensity;
 }) {
-  const calmed = status === "CALMED";
+  const view = endedView(status, turnsToCalm, card);
   return (
     <div
       role="status"
-      className="rounded-xl border border-gray-200 p-6 dark:border-gray-800"
+      data-end-reason={status}
+      className={`rounded-xl border p-6 ${view.className}`}
     >
-      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-50">
-        {calmed ? "진정 종료" : "진정시키지 못한 채 종료"}
-      </h2>
-      <p className="mt-2 text-gray-700 dark:text-gray-300">
-        {calmed
-          ? `${card.complainantRoleName}이(가) 진정했습니다. 소요 턴 수 ${turnsToCalm ?? "-"}턴.`
-          : `최대 ${card.hardTurnLimit}턴에 닿아 훈련이 끝났습니다.`}
-      </p>
-      <div className="mt-5 flex flex-wrap items-center gap-4">
+      <p className="text-sm font-medium opacity-80">훈련 종료</p>
+      <h2 className="mt-1 text-2xl font-bold">{view.title}</h2>
+      {view.headline && (
+        <p className="mt-4 text-4xl font-bold tabular-nums">{view.headline}</p>
+      )}
+      <p className="mt-3">{view.description}</p>
+      <div className="mt-6 flex flex-wrap items-center gap-4">
         <RestartLink card={card} intensity={intensity} />
         <BackToCard cardId={card.cardId} />
       </div>
     </div>
   );
+}
+
+function endedView(
+  status: TrainingSessionStatus,
+  turnsToCalm: number | null,
+  card: OfficialCard,
+): { title: string; headline?: string; description: string; className: string } {
+  const neutral =
+    "border-gray-200 text-gray-900 dark:border-gray-800 dark:text-gray-50";
+  switch (status) {
+    case "CALMED":
+      return {
+        title: "진정 종료",
+        headline: turnsToCalm !== null ? `${turnsToCalm}턴` : undefined,
+        description: `${card.complainantRoleName}이(가) 진정했습니다. 소요 턴 수가 성장 기록의 기준이 됩니다.`,
+        className:
+          "border-emerald-300 bg-emerald-50 text-emerald-950 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-50",
+      };
+    case "TURN_LIMIT_REACHED":
+      return {
+        title: "진정시키지 못한 채 종료",
+        description: `최대 ${card.hardTurnLimit}턴 안에 ${card.complainantRoleName}이(가) 진정하지 않았습니다. 이 훈련은 성장 기록에 들어가지 않습니다.`,
+        className:
+          "border-amber-300 bg-amber-50 text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-50",
+      };
+    case "ABORTED":
+      return {
+        title: "훈련을 중단했습니다",
+        description: "중단한 훈련은 성장 기록에 들어가지 않습니다. 준비되면 언제든 다시 시작할 수 있습니다.",
+        className: neutral,
+      };
+    case "SYSTEM_ERROR":
+      return {
+        title: "시스템 오류로 중단",
+        description: "사용자의 응대 때문이 아닙니다. 이 세션은 성장 기록에 들어가지 않습니다.",
+        className: neutral,
+      };
+    default:
+      return {
+        title: "훈련이 끝났습니다",
+        description: "이 세션은 성장 기록에 들어가지 않습니다.",
+        className: neutral,
+      };
+  }
 }
 
 function TurnNotice({

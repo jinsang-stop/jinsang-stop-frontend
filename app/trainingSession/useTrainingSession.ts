@@ -5,6 +5,7 @@ import type { Intensity } from "~/officialCard/types";
 import {
   abortTrainingSession,
   fetchCurrentTrainingSession,
+  fetchTrainingSession,
   fetchTurnScore,
   startTrainingSession,
   submitUtteranceTurn,
@@ -23,8 +24,9 @@ export type SessionPhase =
   /** 시작이 거절됐는데 진행 중인 세션이 내 것이다 — 이어 하거나 중단하고 새로 시작한다. */
   | { kind: "ownSessionInProgress"; session: TrainingSession }
   | { kind: "active"; session: TrainingSession }
-  | { kind: "aborted"; error: unknown }
-  /** 진정 종료 · 턴 상한 도달로 끝났다. 종료 화면은 #6에서 채운다. */
+  /** 시스템 오류로 중단 — 백엔드가 세션을 `SYSTEM_ERROR`로 끝냈다. */
+  | { kind: "aborted"; error: unknown; sessionId: number }
+  /** 진정 종료 · 턴 상한 도달 · 사용자 중단 등으로 끝났다. */
   | {
       kind: "ended";
       status: TrainingSessionStatus;
@@ -75,8 +77,11 @@ export function useTrainingSession(cardId: number, intensity: Intensity) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   /** 환경 미준비로 거절된 녹음 — 턴이 소모되지 않아 그대로 다시 보낼 수 있다. */
   const unsentAudioRef = useRef<Blob | null>(null);
+  /** 사용자가 중단했다 — 늦게 도착하는 턴 응답과 재생 종료를 무시한다. */
+  const stoppedRef = useRef(false);
 
   const activate = useCallback((session: TrainingSession) => {
+    stoppedRef.current = false;
     setTurnCount(session.turnCount);
     setPhase({ kind: "active", session });
   }, []);
@@ -201,7 +206,7 @@ export function useTrainingSession(cardId: number, intensity: Intensity) {
       try {
         result = await submitUtteranceTurn(sessionId, audio);
       } catch (error) {
-        if (unmountedRef.current) {
+        if (unmountedRef.current || stoppedRef.current) {
           return;
         }
         setActivity("ready");
@@ -216,14 +221,15 @@ export function useTrainingSession(cardId: number, intensity: Intensity) {
               setNotice({ kind: "environmentNotReady", error });
               return;
             case TrainingSessionErrorCode.endedBySystemError:
-              setPhase({ kind: "aborted", error });
+              setPhase({ kind: "aborted", error, sessionId });
               return;
           }
         }
         setNotice({ kind: "submitFailed", error });
         return;
       }
-      if (unmountedRef.current) {
+      if (unmountedRef.current || stoppedRef.current) {
+        // 응답을 기다리는 사이 사용자가 중단했다 — 결과를 화면에 올리지 않는다.
         return;
       }
       setTurns((prev) => [
@@ -263,6 +269,42 @@ export function useTrainingSession(cardId: number, intensity: Intensity) {
     }
   }, [submitTurn]);
 
+  /**
+   * 사용자 중단 — 확인창 없이 한 번에 끝낸다. 녹음 정리는 화면이 하고, 여기서는
+   * 재생을 멈추고 진행 중인 응답을 버린 뒤 백엔드에 중단을 알린다.
+   */
+  const abort = useCallback(async () => {
+    if (phase.kind !== "active" || stoppedRef.current) {
+      return;
+    }
+    const { sessionId } = phase.session;
+    stoppedRef.current = true;
+    audioRef.current?.pause();
+    audioRef.current = null;
+    unsentAudioRef.current = null;
+    setSpeakingTurnNumber(null);
+    setActivity("ready");
+    setNotice(null);
+    let ended: TrainingSession;
+    try {
+      ended = await abortTrainingSession(sessionId);
+    } catch {
+      // 그사이 다른 사유로 끝났으면(409) 실제 종료 사유를 다시 받아 보여 준다.
+      ended = await fetchTrainingSession(sessionId).catch(() => ({
+        ...phase.session,
+        status: "ABORTED" as const,
+      }));
+    }
+    if (!unmountedRef.current) {
+      setPhase({
+        kind: "ended",
+        status: ended.status,
+        turnsToCalm: ended.turnsToCalm,
+        sessionId,
+      });
+    }
+  }, [phase]);
+
   const clearNotice = useCallback(() => {
     unsentAudioRef.current = null;
     setNotice(null);
@@ -281,6 +323,7 @@ export function useTrainingSession(cardId: number, intensity: Intensity) {
     abortAndRestart,
     submitTurn,
     resendUnsentTurn,
+    abort,
     clearNotice,
   };
 }

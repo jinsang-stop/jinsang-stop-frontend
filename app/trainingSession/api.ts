@@ -2,6 +2,7 @@ import { apiFetch } from "~/api/client";
 import {
   mockAbortTrainingSession,
   mockFetchCurrentTrainingSession,
+  mockFetchTrainingSession,
   mockFetchTurnScore,
   mockStartTrainingSession,
   mockSubmitUtteranceTurn,
@@ -46,6 +47,16 @@ export async function fetchCurrentTrainingSession(): Promise<TrainingSession | n
     "/api/training-sessions/current",
   );
   return session ?? null;
+}
+
+/** 세션 하나 — 현재 상태(진행 중이면 `IN_PROGRESS`, 끝났으면 종료 사유)와 턴 수. */
+export async function fetchTrainingSession(
+  sessionId: number,
+): Promise<TrainingSession> {
+  if (USE_MOCK) {
+    return mockFetchTrainingSession(sessionId);
+  }
+  return apiFetch<TrainingSession>(`/api/training-sessions/${sessionId}`);
 }
 
 /** 진행 중인 세션을 중단한다. */

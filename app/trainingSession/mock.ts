@@ -93,11 +93,25 @@ export async function mockFetchCurrentTrainingSession(): Promise<TrainingSession
   return null;
 }
 
+export async function mockFetchTrainingSession(
+  sessionId: number,
+): Promise<TrainingSession> {
+  await wait(150);
+  return { ...findSession(sessionId).session };
+}
+
 export async function mockAbortTrainingSession(
   sessionId: number,
 ): Promise<TrainingSession> {
   await wait(300);
   const mock = findSession(sessionId);
+  if (mock.session.status !== "IN_PROGRESS") {
+    throw new ApiError(
+      409,
+      "TRAINING_SESSION_NOT_IN_PROGRESS",
+      "이미 끝난 훈련 세션입니다.",
+    );
+  }
   mock.session = {
     ...mock.session,
     status: "ABORTED",
