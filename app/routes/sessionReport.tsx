@@ -101,6 +101,12 @@ export default function SessionReportScreen({ loaderData }: Route.ComponentProps
         >
           같은 카드 재도전
         </Link>
+        <Link
+          to={`/cards/${report.cardId}/growth`}
+          className="text-sm underline"
+        >
+          이 카드의 성장 기록
+        </Link>
         <Link to="/" className="text-sm underline">
           공식 카드 목록
         </Link>
